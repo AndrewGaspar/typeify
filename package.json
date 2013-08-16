@@ -1,0 +1,31 @@
+{
+  "name": "typeify",
+  "version": "0.0.1",
+  "description": "typeify =======",
+  "main": "typeify.js",
+  "scripts": {
+	"prepublish": "tsc -m commonjs -d typeify.ts",
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AndrewGaspar/typeify.git"
+  },
+  "keywords": [
+    "browserify",
+    "typescript",
+    "typeify",
+    "transform"
+  ],
+  "author": "Andrew Gaspar",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/AndrewGaspar/typeify/issues"
+  },
+  "devDependencies": {
+    "browserify": "~2.27.1"
+  },
+  "dependencies": {
+    "through": "~2.3.4"
+  }
+}

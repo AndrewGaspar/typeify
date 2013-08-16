@@ -1,0 +1,4 @@
+*.tgz
+typeify.ts
+node_modules
+tests
