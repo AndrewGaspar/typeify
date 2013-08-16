@@ -1,7 +1,7 @@
 {
-  "name": "typeify",
+  "name": "typescriptify",
   "version": "0.1.0",
-  "description": "typeify =======",
+  "description": "A browserify transform for TypeScript.",
   "main": "typeify.js",
   "scripts": {
     "prepublish": "tsc -m commonjs -d typeify.ts",
