@@ -73,7 +73,7 @@ function compile(file, data, cb: (err, text?: string) => void) {
 	var fileName = path.basename(file, ".ts");
 	var dir = path.dirname(file);
 
-	childproc.exec("tsc -m commonjs " + file, { encoding: "utf8" }, function (error, stdout, stderr) {
+	childproc.exec("tsc --sourcemap -m commonjs " + file, { encoding: "utf8" }, function (error, stdout, stderr) {
 		if ((stdout && stdout.length > 0) || (stderr && stderr.length > 0)) {
 			var tce = new TypescriptCompileError();
 			tce.stdout = stdout.toString();
