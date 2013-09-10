@@ -1,9 +1,9 @@
 import B = require('B');
 import C = require('C');
 
-import q = require("q");
+//import q = require("q");
 
-q(3).then(console.log);
+//q(3).then(console.log);
 
 class A {
 	myB: B = new B();

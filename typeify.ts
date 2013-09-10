@@ -3,6 +3,11 @@ import fs = require("fs");
 import childproc = require("child_process");
 import path = require("path");
 
+import convert = require("convert-source-map");
+import embed = require("embed-source-map");
+
+var myPathMap: { [key: string]: string } = {};
+
 class TypescriptCompileError implements Error {
 	name = "Compile Error";
 	message = "Could not compile TypeScript file";
@@ -10,16 +15,22 @@ class TypescriptCompileError implements Error {
 	stderr: string;
 }
 
+var sourceMapUrlRegex = /\/\/# sourceMappingURL=(([\w-\.]+)\.js\.map)/;
+
 // Turns out the following code is not necessary - it seemingly works, but tsc will automatically compile dependencies
-/*
+
 var postCompileRequireRegex = /(var \w* = require\(")([\.\\\/]*\w+)("\))/;
 
-function replaceFirstRequire(originalText: string, callback: (err, data: {
+function replaceFirstRequire(dir: string, originalText: string, callback: (err, data: {
+	match: string;
+	replacement: string;
+	requirePath: string;
+	tsPath: string;
 	newText: string;
 	matchIndex: number;
 }) => void) {
 	var matchObj = postCompileRequireRegex.exec(originalText);
-	if (!matchObj) return callback(null, { newText: originalText, matchIndex: originalText.length });
+	if (!matchObj) return callback(null, { match: "", replacement: "", requirePath: null, tsPath: null, newText: originalText, matchIndex: originalText.length });
 	else {
 		var match = matchObj[0];
 		var prefix = matchObj[1];
@@ -28,35 +39,36 @@ function replaceFirstRequire(originalText: string, callback: (err, data: {
 		var index: number = matchObj.index
 
 		var tsPath = requirePath + ".ts";
-		fs.exists(tsPath, function (exists) {
+		var filePath = path.join(dir, tsPath);
+		fs.exists(filePath, exists => {
 			var output = originalText;
 			if (exists) {
-				output = originalText.replace(match, prefix + tsPath + postFix);
+				var replacement = prefix + tsPath + postFix;
+				output = originalText.replace(match, replacement);
 			}
-			callback(null, { newText: output, matchIndex: index });
+			callback(null, { match: match, replacement: replacement, requirePath: requirePath, tsPath: tsPath, newText: output, matchIndex: index });
 		});
 	}
 }
 
 function convertRequirePaths(fileName: string, originalText: string, cb: (err, newText?: string) => void) {
+	var dir = path.dirname(fileName);
+
 	function replacer(text: string, cb: (err, text?: string) => void) {
-		replaceFirstRequire(text, (err, data) => {
+		replaceFirstRequire(dir, text, (err, data) => {
 			if (err) return cb(err);
 
 			if (data.matchIndex == text.length) {
 				return cb(null, data.newText);
 			}
 
-			var pre = data.newText.substring(0, data.matchIndex + 1);
-			var sub = data.newText.substr(data.matchIndex + 1);
+			myPathMap[path.normalize(path.join(dir, data.tsPath))] = path.normalize(path.join(dir, data.requirePath));
 
-			console.log("Replacing:\n");
-			console.log(sub);
+			var pre = data.newText.substring(0, data.matchIndex + data.replacement.length);
+			var sub = data.newText.substr(data.matchIndex + data.replacement.length);
+
 			replacer(sub, (err, text?: string) => {
 				if (err) return cb(err);
-
-				console.log("Replaced with:")
-				console.log(text);
 
 				cb(null, pre + text);
 			});
@@ -65,27 +77,33 @@ function convertRequirePaths(fileName: string, originalText: string, cb: (err, n
 
 	replacer(originalText, cb);
 }
-*/
 
-function compile(file, data, cb: (err, text?: string) => void) {
-	if (!isTypescript(file)) return cb(new Error("Not a typescript file"));
+
+function compile(file, cb: (err, text?: string) => void) {
+	if (!isTypescript(file)) {
+		return cb(new Error("Not a typescript file"));
+	}
 
 	var fileName = path.basename(file, ".ts");
 	var dir = path.dirname(file);
 
-	childproc.exec("tsc --sourcemap -m commonjs " + file, { encoding: "utf8" }, function (error, stdout, stderr) {
-		if ((stdout && stdout.length > 0) || (stderr && stderr.length > 0)) {
-			var tce = new TypescriptCompileError();
-			tce.stdout = stdout.toString();
-			tce.stderr = stderr.toString();
-			return cb(tce);
-		} else {
-			fs.readFile(path.join(dir, fileName + ".js"), { encoding: "utf8" }, function (err, originalText: string) {
-				cb(err, originalText);
-				//convertRequirePaths(file, originalText, cb);
-			});
-		}
-	});
+	var jsPath: string;
+	if (jsPath = myPathMap[path.normalize(file)]) {
+		console.log(file + " already compiled.");
+		fs.readFile(jsPath, { encoding: "utf8" }, cb);
+	} else {
+		console.log("Compiling " + file);
+		childproc.exec("tsc --sourcemap -m commonjs " + file, { encoding: "utf8" }, function (error, stdout, stderr) {
+			if ((stdout && stdout.length > 0) || (stderr && stderr.length > 0)) {
+				var tce = new TypescriptCompileError();
+				tce.stdout = stdout.toString();
+				tce.stderr = stderr.toString();
+				return cb(tce);
+			} else {
+				fs.readFile(path.join(dir, fileName + ".js"), { encoding: "utf8" }, cb);
+			}
+		});
+	}
 }
 
 function isTypescript(file) {
@@ -93,19 +111,36 @@ function isTypescript(file) {
 }
 
 function typeify(file) {
-	if (!isTypescript(file)) return through();
+	return through(() => { }, end);
 
-	var data = '';
-	return through(write, end);
-
-	function write(buf) { data += buf }
 	function end() {
-		compile(file, data, (err, data?: string) => {
-			if (err) this.emit('error', err);
+		var onCompile = (err, data?: string) => {
+			if (err) return this.emit('error', err);
 
-			this.queue(data);
-			this.queue(null);
-		});
+			embed(jsFile, (err, text?: string) => {
+				if (err) return this.emit('error', err);
+
+				var converter = convert.fromSource(text);
+				var sourceContents: string[] = converter.getProperty("sourcesContent");
+				console.log(sourceContents[0]);
+
+				convertRequirePaths(file, text, (err, text?) => {
+					if (err) return this.emit('error', err);
+
+					this.queue(text);
+					this.queue(null);
+				});
+			});
+		}
+
+		var jsFile: string, dir: string = path.dirname(file);
+		if (isTypescript(file)) {
+			jsFile = path.join(dir, path.basename(file, ".ts") + ".js");
+			compile(file, onCompile);
+		} else {
+			jsFile = file;
+			fs.readFile(file, { encoding: "utf8" }, onCompile);
+		}
 	}
 };
 
